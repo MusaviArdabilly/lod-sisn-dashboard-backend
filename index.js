@@ -418,6 +418,7 @@ app.get('/api/update-all-v2', async (req, res) => {
       }, []).map(({ key, ...rest }) => rest);
     }
 
+    // TODO: make it not remove the last exec, est duration
     // filter redundant and keep latest start_time
     const uniqueFolders = filterUniqueWithLatest(tmpFolders, fld => 
       `${fld.folder}-${fld.orderDate}`
@@ -459,8 +460,16 @@ app.get('/api/update-all-v2', async (req, res) => {
         status = EXCLUDED.status,
         start_time = EXCLUDED.start_time,
         end_time = EXCLUDED.end_time,
-        estimated_start_time = EXCLUDED.estimated_start_time,
-        estimated_end_time = EXCLUDED.estimated_end_time
+        estimated_start_time = 
+          CASE 
+            WHEN folders.estimated_start_time IS NULL THEN EXCLUDED.estimated_start_time
+            ELSE folders.estimated_start_time
+          END,
+        estimated_end_time = 
+          CASE 
+            WHEN folders.estimated_end_time IS NULL THEN EXCLUDED.estimated_end_time
+            ELSE folders.estimated_end_time
+          END;
     `
 
     const insertOrUpdateJobs = `
