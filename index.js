@@ -418,7 +418,6 @@ app.get('/api/update-all-v2', async (req, res) => {
       }, []).map(({ key, ...rest }) => rest);
     }
 
-    // TODO: make it not remove the last exec, est duration
     // filter redundant and keep latest start_time
     const uniqueFolders = filterUniqueWithLatest(tmpFolders, fld => 
       `${fld.folder}-${fld.orderDate}`
