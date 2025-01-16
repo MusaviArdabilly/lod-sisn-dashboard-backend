@@ -530,7 +530,6 @@ app.get('/api/update-all-v2', async (req, res) => {
 
 app.get('/api/jobs-folders/:app', async (req, res) => {
   const application = req.params.app;
-  // TODO: need review -> order by start_time 
   try {
     const jobs = await db.query(`
       SELECT folder, name, type, status,
@@ -638,10 +637,14 @@ app.get('/api/jobs-folders/:app', async (req, res) => {
   }
 });
 
-app.get('/api/jobs-folders/export/:app', async (req, res) => {
+app.get('/api/jobs-folders/export/:app', async (req, res) => { 
   console.log('exporting csv')
   const application = req.params.app;
-
+  const filterType = req.params.type;
+  const filterRunbook = req.params.runbook;
+  const filterStatus = req.params.status;
+  const filterDate = req.params.date;
+  
   try {
     // Fetch data for jobs and folders
     const jobs = await db.query(`
@@ -649,13 +652,18 @@ app.get('/api/jobs-folders/export/:app', async (req, res) => {
         NULLIF(start_time, '1999-01-01 00:00:00') AS start_time,
         NULLIF(end_time, '1999-01-01 00:00:00') AS end_time,
         order_date, application, sub_application
-      FROM jobs WHERE application LIKE $1 
+      FROM jobs 
+      WHERE application LIKE $1 
       AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
+      AND type = $2
+      AND folder LIKE $3
+      AND status LIKE $4
+      AND order_date = $5
       ORDER BY start_time DESC NULLS LAST
-    `, [`%${application}%`]);
+    `, [`%${application}%`, `${filterType}`, `%${filterRunbook}%`, `%${filterStatus}%`, `${filterDate}`]);
 
     const folders = await db.query(`
-      SELECT name, application, status, 
+      SELECT name, application, status, order_date
       NULLIF(start_time, '1999-01-01 00:00:00') AS start_time, 
       NULLIF(end_time, '1999-01-01 00:00:00') AS end_time, 
       NULLIF(estimated_start_time, '1999-01-01 00:00:00') AS estimated_start_time, 
@@ -663,9 +671,11 @@ app.get('/api/jobs-folders/export/:app', async (req, res) => {
       FROM folders
       WHERE application LIKE $1 
       AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
-      AND name NOT LIKE '%/%'
+      AND name LIKE $2
+      AND status LIKE $3
+      AND order_date = $4
       ORDER BY start_time DESC
-    `, [`%${application}%`]);
+    `, [`%${application}%`, `%${filterRunbook}%`, `%${filterStatus}%`, `${filterDate}`]);
 
     // Initialize a new workbook and add two sheets
     const workbook = new ExcelJS.Workbook();
