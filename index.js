@@ -393,8 +393,8 @@ app.get('/api/update-all-v2', async (req, res) => {
 
         // sort applications, folders, and jobs
         tmpApps.sort((a, b) => a.application.localeCompare(b.application));
-        tmpFolders.sort((a, b) => a.folder.localeCompare(b.folder));
-        tmpJobs.sort((a, b) => a.orderDate.localeCompare(b.orderDate));
+        tmpFolders.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+        tmpJobs.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
       }
     }
     console.log('tmpApps:', tmpApps.length);
@@ -454,19 +454,21 @@ app.get('/api/update-all-v2', async (req, res) => {
             : `TO_TIMESTAMP('19990101000000', 'YYYYMMDDHH24MISS') AT TIME ZONE 'Asia/Jakarta'`},
           '${escapeString(folder.application)}'
         )`).join(', ')}
-      ON CONFLICT (name, order_date)
+      ON CONFLICT (name, order_date, start_time)
       DO UPDATE SET 
         status = EXCLUDED.status,
-        start_time = EXCLUDED.start_time,
-        end_time = EXCLUDED.end_time,
+        end_time = CASE
+            WHEN EXCLUDED.end_time > folders.end_time THEN TO_TIMESTAMP(EXCLUDED.end_time, 'YYYYMMDDHH24MISS') AT TIME ZONE 'Asia/Jakarta'
+            ELSE folders.end_time
+          END,
         estimated_start_time = 
           CASE 
-            WHEN folders.estimated_start_time IS NULL THEN EXCLUDED.estimated_start_time
+            WHEN folders.estimated_start_time IS NULL THEN TO_TIMESTAMP(EXCLUDED.estimated_start_time, 'YYYYMMDDHH24MISS') AT TIME ZONE 'Asia/Jakarta'
             ELSE folders.estimated_start_time
           END,
         estimated_end_time = 
           CASE 
-            WHEN folders.estimated_end_time IS NULL THEN EXCLUDED.estimated_end_time
+            WHEN folders.estimated_end_time IS NULL THEN TO_TIMESTAMP(EXCLUDED.estimated_end_time, 'YYYYMMDDHH24MISS') AT TIME ZONE 'Asia/Jakarta'
             ELSE folders.estimated_end_time
           END;
     `
@@ -488,11 +490,13 @@ app.get('/api/update-all-v2', async (req, res) => {
           '${escapeString(job.subApplication)}',
           '${escapeString(job.folder)}'
         )`).join(', ')}
-      ON CONFLICT (name, order_date, folder)
+      ON CONFLICT (name, order_date, start_time, folder)
       DO UPDATE SET
         status = EXCLUDED.status,
-        start_time = EXCLUDED.start_time,
-        end_time = EXCLUDED.end_time
+        end_time = CASE
+            WHEN EXCLUDED.end_time > jobs.end_time THEN TO_TIMESTAMP(EXCLUDED.end_time, 'YYYYMMDDHH24MISS') AT TIME ZONE 'Asia/Jakarta'
+            ELSE folders.end_time
+          END,
     `
     if (tmpFolders.length > 0) {
       console.log('Insert or updating Folders');
@@ -526,6 +530,7 @@ app.get('/api/update-all-v2', async (req, res) => {
 
 app.get('/api/jobs-folders/:app', async (req, res) => {
   const application = req.params.app;
+  // TODO: need review -> order by start_time 
   try {
     const jobs = await db.query(`
       SELECT folder, name, type, status,
