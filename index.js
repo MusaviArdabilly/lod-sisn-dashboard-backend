@@ -458,17 +458,17 @@ app.get('/api/update-all-v2', async (req, res) => {
       DO UPDATE SET 
         status = EXCLUDED.status,
         end_time = CASE
-            WHEN EXCLUDED.end_time > folders.end_time THEN TO_TIMESTAMP(EXCLUDED.end_time, 'YYYYMMDDHH24MISS') AT TIME ZONE 'Asia/Jakarta'
+            WHEN EXCLUDED.end_time > folders.end_time THEN EXCLUDED.end_time
             ELSE folders.end_time
           END,
         estimated_start_time = 
           CASE 
-            WHEN folders.estimated_start_time IS NULL THEN TO_TIMESTAMP(EXCLUDED.estimated_start_time, 'YYYYMMDDHH24MISS') AT TIME ZONE 'Asia/Jakarta'
+            WHEN folders.estimated_start_time IS NULL THEN EXCLUDED.estimated_start_time
             ELSE folders.estimated_start_time
           END,
         estimated_end_time = 
           CASE 
-            WHEN folders.estimated_end_time IS NULL THEN TO_TIMESTAMP(EXCLUDED.estimated_end_time, 'YYYYMMDDHH24MISS') AT TIME ZONE 'Asia/Jakarta'
+            WHEN folders.estimated_end_time IS NULL THEN EXCLUDED.estimated_end_time
             ELSE folders.estimated_end_time
           END;
     `
@@ -494,9 +494,9 @@ app.get('/api/update-all-v2', async (req, res) => {
       DO UPDATE SET
         status = EXCLUDED.status,
         end_time = CASE
-            WHEN EXCLUDED.end_time > jobs.end_time THEN TO_TIMESTAMP(EXCLUDED.end_time, 'YYYYMMDDHH24MISS') AT TIME ZONE 'Asia/Jakarta'
-            ELSE folders.end_time
-          END,
+            WHEN EXCLUDED.end_time > jobs.end_time THEN EXCLUDED.end_time
+            ELSE jobs.end_time
+          END;
     `
     if (tmpFolders.length > 0) {
       console.log('Insert or updating Folders');
