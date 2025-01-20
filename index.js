@@ -32,6 +32,17 @@ SECRET_KEY = process.env.JWT_SECRET;
 const MAX_LOGIN_ATTEMPTS = 3;
 const COOLDOWN_PERIOD = 15 * 60 * 1000; //15 minutes
 
+function parseDate(time) {
+  const year = time.slice(0, 4);
+  const month = time.slice(4, 6) - 1; // Month is zero-based in Date
+  const day = time.slice(6, 8);
+  const hours = time.slice(8, 10);
+  const minutes = time.slice(10, 12);
+  const seconds = time.slice(12, 14);
+
+  return new Date(year, month, day, hours, minutes, seconds);
+}
+
 function hashPassword(password) {
   return crypto.createHash('sha256').update(password).digest('hex');
 };
@@ -369,7 +380,7 @@ app.get('/api/update-all-v2', async (req, res) => {
           for (const location of locations) {
             for (const action of actions) {
               if (folder.includes(`${action}_${appName}_To_${location}`)) {
-                if (!tmpFolders.some(fld => fld.folder === folder && fld.startTime) && !folder.includes('/')) {
+                if (type === 'Folder' && !folder.includes('/')) {
                   tmpFolders.push({
                     'folder': folder, 'status': status, 
                     'orderDate': orderDate, 'startTime': startTime, 'endTime': endTime, 
@@ -378,8 +389,7 @@ app.get('/api/update-all-v2', async (req, res) => {
                   });
                 }
                 //remove some if allow redundant job name in tmpJobs but wont affect db because db check by orderdate
-                if (['Command', 'Dummy', 'Job'].includes(type) && !tmpJobs.some(job => 
-                  job.name === name && job.startTime === startTime)) {
+                if (['Command', 'Dummy', 'Job'].includes(type)) {
                     tmpJobs.push({
                       'name': name, 'type': type, 'status': status, 'orderDate': orderDate, 
                       'startTime': startTime, 'endTime': endTime, 'application': application, 
@@ -390,49 +400,47 @@ app.get('/api/update-all-v2', async (req, res) => {
             }
           }
         }
-
-        // sort applications, folders, and jobs
-        tmpApps.sort((a, b) => a.application.localeCompare(b.application));
-        tmpFolders.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-        tmpJobs.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
       }
     }
     console.log('tmpApps:', tmpApps.length);
-    console.log('tmpFolders:', tmpFolders.length);
+    console.log(tmpFolders.length, 'tmpFolders:', tmpFolders);
     console.log('tmpJobs:', tmpJobs.length);
-
-    const filterUniqueWithLatest = (items, keyGenerator) => {
-      return items.reduce((acc, current) => {
-        const key = keyGenerator(current);
-        const existing = acc.find(item => item.key === key);
-    
-        if (existing) {
-          if (new Date(current.startTime) > new Date(existing.startTime)) {
-            existing.startTime = current.startTime;
-          }
-        } else {
-          acc.push({ ...current, key });
-        }
-    
-        return acc;
-      }, []).map(({ key, ...rest }) => rest);
-    }
-
-    // filter redundant and keep latest start_time
-    const uniqueFolders = filterUniqueWithLatest(tmpFolders, fld => 
-      `${fld.folder}-${fld.orderDate}`
-    );
-    const uniqueJobs = filterUniqueWithLatest(tmpJobs, job => 
-      `${job.folder}-${job.name}-${job.orderDate}`
-    );
-
-    console.log('uniqueTmpFolders:', uniqueFolders.length);
-    console.log('uniqueTmpJobs:', uniqueJobs.length);
 
     const escapeString = (str) => {
       return str.replace(/'/g, "''");
     };
 
+    // Deduplicate folders based on the unique constraint, keeping the latest start_time
+    // Use parsedDate() because from CTM API is startTime: '20250120085240'
+    const uniqueFolders = Array.from(
+      tmpFolders
+        .sort((a, b) => parseDate(b.startTime) - parseDate(a.startTime)) // Sort by start_time descending
+        .reduce((map, folder) => {
+          const key = `${folder.folder}-${folder.orderDate}`;
+          if (!map.has(key) || parseDate(folder.startTime) > parseDate(map.get(key).startTime)) {
+            map.set(key, folder);
+          }
+          return map;
+        }, new Map())
+        .values()
+    );
+
+    // Deduplicate jobs based on the unique constraint, keeping the latest start_time
+    const uniqueJobs = Array.from(
+      tmpJobs
+        .sort((a, b) => parseDate(b.startTime) - parseDate(a.startTime)) // Sort by start_time descending
+        .reduce((map, job) => {
+          const key = `${job.name}-${job.orderDate}-${job.folder}`;
+          if (!map.has(key) || parseDate(job.startTime) > parseDate(map.get(key).startTime)) {
+            map.set(key, job);
+          }
+          return map;
+        }, new Map())
+        .values()
+    );
+
+    console.log('uniqueFolders', uniqueFolders);
+    
     const insertOrUpdateFolders = `
       INSERT INTO folders (
         name, status, order_date, start_time, end_time, estimated_start_time,
@@ -454,23 +462,25 @@ app.get('/api/update-all-v2', async (req, res) => {
             : `TO_TIMESTAMP('19990101000000', 'YYYYMMDDHH24MISS') AT TIME ZONE 'Asia/Jakarta'`},
           '${escapeString(folder.application)}'
         )`).join(', ')}
-      ON CONFLICT (name, order_date, start_time)
+      ON CONFLICT (name, order_date)
       DO UPDATE SET 
         status = EXCLUDED.status,
-        end_time = CASE
+        start_time = CASE 
+            WHEN EXCLUDED.start_time > folders.start_time THEN EXCLUDED.start_time
+            ELSE folders.start_time
+          END,
+        end_time = CASE 
             WHEN EXCLUDED.end_time > folders.end_time THEN EXCLUDED.end_time
             ELSE folders.end_time
           END,
-        estimated_start_time = 
-          CASE 
-            WHEN folders.estimated_start_time IS NULL THEN EXCLUDED.estimated_start_time
+        estimated_start_time = CASE 
+            WHEN EXCLUDED.estimated_start_time > folders.estimated_start_time THEN EXCLUDED.estimated_start_time
             ELSE folders.estimated_start_time
           END,
-        estimated_end_time = 
-          CASE 
-            WHEN folders.estimated_end_time IS NULL THEN EXCLUDED.estimated_end_time
+        estimated_end_time = CASE 
+            WHEN EXCLUDED.estimated_end_time > folders.estimated_end_time THEN EXCLUDED.estimated_end_time
             ELSE folders.estimated_end_time
-          END;
+          END
     `
 
     const insertOrUpdateJobs = `
@@ -490,17 +500,21 @@ app.get('/api/update-all-v2', async (req, res) => {
           '${escapeString(job.subApplication)}',
           '${escapeString(job.folder)}'
         )`).join(', ')}
-      ON CONFLICT (name, order_date, start_time, folder)
+      ON CONFLICT (name, order_date, folder)
       DO UPDATE SET
         status = EXCLUDED.status,
-        end_time = CASE
+        start_time = CASE 
+            WHEN EXCLUDED.start_time > jobs.start_time THEN EXCLUDED.start_time
+            ELSE jobs.start_time
+          END,
+        end_time = CASE 
             WHEN EXCLUDED.end_time > jobs.end_time THEN EXCLUDED.end_time
             ELSE jobs.end_time
-          END;
+          END
     `
     if (tmpFolders.length > 0) {
       console.log('Insert or updating Folders');
-      // console.log(insertOrUpdateFolders);
+      console.log('SQL Query for Folders:', insertOrUpdateFolders);
       await db.query(insertOrUpdateFolders);
     } else {
       console.log('Temporary folders is empty, nothing to insert or update')
