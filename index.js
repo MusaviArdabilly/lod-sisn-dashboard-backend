@@ -651,45 +651,68 @@ app.get('/api/jobs-folders/:app', async (req, res) => {
   }
 });
 
-app.get('/api/jobs-folders/export/:app', async (req, res) => { 
-  console.log('exporting csv')
+app.get('/api/jobs-folders/export/:app', async (req, res) => {
+  console.log('exporting csv');
   const application = req.params.app;
-  const filterType = req.params.type;
-  const filterRunbook = req.params.runbook;
-  const filterStatus = req.params.status;
-  const filterDate = req.params.date;
-  
+  const { type, runbook, status, date } = req.query;
+
   try {
-    // Fetch data for jobs and folders
-    const jobs = await db.query(`
+    // Initialize dynamic conditions and parameters
+    let jobConditions = ['application LIKE $1', "created_at >= DATE_TRUNC('month', CURRENT_DATE)"];
+    let jobParams = [`%${application}%`];
+
+    let folderConditions = ['application LIKE $1', "created_at >= DATE_TRUNC('month', CURRENT_DATE)"];
+    let folderParams = [`%${application}%`];
+
+    // Add dynamic filters for jobs
+    if (type) {
+      jobConditions.push('type = $' + (jobParams.length + 1));
+      jobParams.push(type);
+    }
+    if (runbook) {
+      jobConditions.push('folder LIKE $' + (jobParams.length + 1));
+      jobParams.push(`%${runbook}%`);
+      folderConditions.push('name LIKE $' + (folderParams.length + 1));
+      folderParams.push(`%${runbook}%`);
+    }
+    if (status) {
+      jobConditions.push('status LIKE $' + (jobParams.length + 1));
+      jobParams.push(`%${status}%`);
+      folderConditions.push('status LIKE $' + (folderParams.length + 1));
+      folderParams.push(`%${status}%`);
+    }
+    if (date) {
+      jobConditions.push('order_date = $' + (jobParams.length + 1));
+      jobParams.push(date);
+      folderConditions.push('order_date = $' + (folderParams.length + 1));
+      folderParams.push(date);
+    }
+
+    // Construct SQL queries dynamically
+    const jobsQuery = `
       SELECT folder, name, type, status,
         NULLIF(start_time, '1999-01-01 00:00:00') AS start_time,
         NULLIF(end_time, '1999-01-01 00:00:00') AS end_time,
         order_date, application, sub_application
       FROM jobs 
-      WHERE application LIKE $1 
-      AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
-      AND type = $2
-      AND folder LIKE $3
-      AND status LIKE $4
-      AND order_date = $5
+      WHERE ${jobConditions.join(' AND ')}
       ORDER BY start_time DESC NULLS LAST
-    `, [`%${application}%`, `${filterType}`, `%${filterRunbook}%`, `%${filterStatus}%`, `${filterDate}`]);
+    `;
 
-    const folders = await db.query(`
-      SELECT name, application, status, order_date
-      NULLIF(start_time, '1999-01-01 00:00:00') AS start_time, 
-      NULLIF(end_time, '1999-01-01 00:00:00') AS end_time, 
-      NULLIF(estimated_start_time, '1999-01-01 00:00:00') AS estimated_start_time, 
-      NULLIF(estimated_end_time, '1999-01-01 00:00:00') AS estimated_end_time
+    const foldersQuery = `
+      SELECT name, application, status, order_date,
+        NULLIF(start_time, '1999-01-01 00:00:00') AS start_time, 
+        NULLIF(end_time, '1999-01-01 00:00:00') AS end_time, 
+        NULLIF(estimated_start_time, '1999-01-01 00:00:00') AS estimated_start_time, 
+        NULLIF(estimated_end_time, '1999-01-01 00:00:00') AS estimated_end_time
       FROM folders
-      WHERE application LIKE $1 
-      AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
-      AND name LIKE $2
-      AND status LIKE $3
-      AND order_date = $4
+      WHERE ${folderConditions.join(' AND ')}
       ORDER BY start_time DESC
-    `, [`%${application}%`, `%${filterRunbook}%`, `%${filterStatus}%`, `${filterDate}`]);
+    `;
+
+    // Fetch data for jobs and folders
+    const jobs = await db.query(jobsQuery, jobParams);
+    const folders = await db.query(foldersQuery, folderParams);
 
     // Initialize a new workbook and add two sheets
     const workbook = new ExcelJS.Workbook();
@@ -741,7 +764,7 @@ app.get('/api/jobs-folders/export/:app', async (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename=jobs_folders.xlsx');
 
     await workbook.xlsx.write(res);
-    console.log('export ok')
+    console.log('export ok');
     res.end();
   } catch (error) {
     res.status(500).json({ error: `Failed to export data for application: ${application}` });
