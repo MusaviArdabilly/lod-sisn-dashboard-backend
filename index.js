@@ -10,6 +10,8 @@ const { read } = require('fs');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const verifyToken = require('./middleware/verifyToken');
+const fs = require('fs');``
+const https = require('https');
 
 const ExcelJS = require('exceljs');
 
@@ -31,6 +33,12 @@ let totalJobsDone = {}
 SECRET_KEY = process.env.JWT_SECRET;
 const MAX_LOGIN_ATTEMPTS = 3;
 const COOLDOWN_PERIOD = 15 * 60 * 1000; //15 minutes
+
+const agent = new https.Agent({
+  cert: fs.readFileSync('/etc/nginx/ssl/D1UJHSHOSTLV001.crt'),
+  key: fs.readFileSync('/etc/nginx/ssl/D1UJHSHOSTLV001.key'),
+  rejectUnauthorized: false // Ensures SSL verification
+});
 
 function parseDate(time) {
   const year = time.slice(0, 4);
@@ -56,7 +64,7 @@ async function startTaskUpdateAllData() {
     console.log(cronInterval);
     try {
       await axios.get(`${process.env.CURRENT_BASE_URL}/api/update-all-v2`, {
-        httpsAgent: new (require('https')).Agent({ rejectUnauthorized: false })
+        httpsAgent: agent
       });
       console.log('Update successful');
     } catch (error) {
@@ -68,7 +76,7 @@ async function startTaskUpdateAllData() {
           username: `${process.env.CTM_USERNAME}`,
           password: `${process.env.CTM_PASSWORD}`
         }, {
-          httpsAgent: new (require('https')).Agent({ rejectUnauthorized: false })
+          httpsAgent: agent
         });
         console.log('Successfully generate token');
         await axios.get(`${process.env.CURRENT_BASE_URL}/api/update-all-v2`);
@@ -268,7 +276,7 @@ app.get('/api/config/check', verifyToken, async (req, res) => {
   try {
     await axios.get(`${process.env.CTM_BASE_URL}/automation-api`,{
       timeout: 10000,
-      httpsAgent: new (require('https')).Agent({ rejectUnauthorized: false })
+      httpsAgent: agent
     });
     resultCheckCTM = true;
   } catch (error) {
@@ -287,7 +295,7 @@ app.get('/api/config/check', verifyToken, async (req, res) => {
         'Content-Type': 'application/json'
       },
       timeout: 10000,
-      httpsAgent: new (require('https')).Agent({ rejectUnauthorized: false }) // allows self-signed certificates
+      httpsAgent: agent // allows self-signed certificates
     });
     token = checkAuth.data.token;
     resultCheckAuth = true;
@@ -310,7 +318,7 @@ app.post('/api/generate-token', async (req, res) => {
       headers: {
         'Content-Type': 'application/json'
       },
-      httpsAgent: new (require('https')).Agent({ rejectUnauthorized: false }) // allows self-signed certificates
+      httpsAgent: agent // allows self-signed certificates
     });
     process.env.TOKEN = response.data.token;
     res.status(200).send(response.data.token);
@@ -331,7 +339,7 @@ app.get('/api/update-all-v2', async (req, res) => {
           'Authorization': `Bearer ${process.env.TOKEN}`
         },
         // allows self-signed certificates
-        httpsAgent: new (require('https')).Agent({ rejectUnauthorized: false }) 
+        httpsAgent: agent 
       });
     console.log('Control-M data:', response.data.statuses?.length, 'item');
 
