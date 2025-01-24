@@ -34,11 +34,17 @@ SECRET_KEY = process.env.JWT_SECRET;
 const MAX_LOGIN_ATTEMPTS = 3;
 const COOLDOWN_PERIOD = 15 * 60 * 1000; //15 minutes
 
+// https
+// const agent = new https.Agent({
+//   cert: fs.readFileSync('/etc/nginx/ssl/D1UJHSHOSTLV001.crt'),
+//   key: fs.readFileSync('/etc/nginx/ssl/D1UJHSHOSTLV001.key'),
+//   rejectUnauthorized: false // Ensures SSL verification
+// });
+
+// http
 const agent = new https.Agent({
-  cert: fs.readFileSync('/etc/nginx/ssl/D1UJHSHOSTLV001.crt'),
-  key: fs.readFileSync('/etc/nginx/ssl/D1UJHSHOSTLV001.key'),
-  rejectUnauthorized: false // Ensures SSL verification
-});
+  rejectUnauthorized: false
+})
 
 function parseDate(time) {
   const year = time.slice(0, 4);
@@ -49,6 +55,14 @@ function parseDate(time) {
   const seconds = time.slice(12, 14);
 
   return new Date(year, month, day, hours, minutes, seconds);
+}
+
+function formatDuration(interval) {
+  const hours = interval.hours || 0;
+  const minutes = interval.minutes || 0;
+  const seconds = interval.seconds || 0;
+  
+  return `${hours}h ${minutes}m ${seconds}s`;
 }
 
 function hashPassword(password) {
@@ -701,6 +715,11 @@ app.get('/api/jobs-folders/export/:app', async (req, res) => {
       SELECT folder, name, type, status,
         NULLIF(start_time, '1999-01-01 00:00:00') AS start_time,
         NULLIF(end_time, '1999-01-01 00:00:00') AS end_time,
+        (CASE 
+          WHEN start_time IS NOT NULL AND end_time IS NOT NULL THEN 
+            end_time - start_time
+          ELSE NULL
+        END) AS duration,
         order_date, application, sub_application
       FROM jobs 
       WHERE ${jobConditions.join(' AND ')}
@@ -711,6 +730,11 @@ app.get('/api/jobs-folders/export/:app', async (req, res) => {
       SELECT name, application, status, order_date,
         NULLIF(start_time, '1999-01-01 00:00:00') AS start_time, 
         NULLIF(end_time, '1999-01-01 00:00:00') AS end_time, 
+        (CASE 
+          WHEN start_time IS NOT NULL AND end_time IS NOT NULL THEN 
+            end_time - start_time
+          ELSE NULL
+        END) AS duration,
         NULLIF(estimated_start_time, '1999-01-01 00:00:00') AS estimated_start_time, 
         NULLIF(estimated_end_time, '1999-01-01 00:00:00') AS estimated_end_time
       FROM folders
@@ -735,17 +759,22 @@ app.get('/api/jobs-folders/export/:app', async (req, res) => {
       { header: 'Status', key: 'status' },
       { header: 'Start Time', key: 'start_time' },
       { header: 'End Time', key: 'end_time' },
+      { header: 'Duration', key: 'duration' },
       { header: 'Order Date', key: 'order_date' },
       { header: 'Application', key: 'application' },
       { header: 'Sub Application', key: 'sub_application' }
     ];
 
+    console.log('check:', jobs.rows[0], jobs.rows[1], jobs.rows[2], jobs.rows[3])
     // Add job data to "Jobs" sheet
     jobs.rows.forEach(row => {
-      row.start_time = row.start_time ? new Date(row.start_time).toISOString() : null;
-      row.end_time = row.end_time ? new Date(row.end_time).toISOString() : null;
+      row.start_time = row.start_time ? new Date(row.start_time).toLocaleString('en-GB') : null;
+      row.end_time = row.end_time ? new Date(row.end_time).toLocaleString('en-GB') : null;
+      row.duration = row.duration ? formatDuration(row.duration) : null;
       jobsSheet.addRow(row);
     });
+
+    console.log('check:', jobs.rows[0], jobs.rows[1], jobs.rows[2], jobs.rows[3])
 
     // Define columns for the "Folders" sheet
     foldersSheet.columns = [
@@ -760,10 +789,11 @@ app.get('/api/jobs-folders/export/:app', async (req, res) => {
 
     // Add folder data to "Folders" sheet
     folders.rows.forEach(row => {
-      row.start_time = row.start_time ? new Date(row.start_time).toISOString() : null;
-      row.end_time = row.end_time ? new Date(row.end_time).toISOString() : null;
-      row.estimated_start_time = row.estimated_start_time ? new Date(row.estimated_start_time).toISOString() : null;
-      row.estimated_end_time = row.estimated_end_time ? new Date(row.estimated_end_time).toISOString() : null;
+      row.start_time = row.start_time ? new Date(row.start_time).toLocaleString('en-GB') : null;
+      row.end_time = row.end_time ? new Date(row.end_time).toLocaleString('en-GB') : null; 
+      row.duration = row.duration ? formatDuration(row.duration) : null;
+      row.estimated_start_time = row.estimated_start_time ? new Date(row.estimated_start_time).toLocaleString('en-GB') : null;
+      row.estimated_end_time = row.estimated_end_time ? new Date(row.estimated_end_time).toLocaleString('en-GB') : null;
       foldersSheet.addRow(row);
     });
 
