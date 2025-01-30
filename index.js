@@ -219,7 +219,7 @@ app.post('/api/login', async (req, res) => {
 
     await db.query(`UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE username = $1`, [username]);
 
-    const token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY, { expiresIn: '1h'});
+    const token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY, { expiresIn: '20m'});
 
     res.status(200).json({ token: token });
   } catch (error) {
