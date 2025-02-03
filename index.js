@@ -402,7 +402,8 @@ app.get('/api/update-all-v2', async (req, res) => {
           for (const location of locations) {
             for (const action of actions) {
               if (folder.includes(`${action}_${appName}_To_${location}`)) {
-                if (type === 'Folder' && !folder.includes('/')) {
+                // if (type === 'Folder' && (!folder.includes('/') || folder.includes('#SRT'))) {
+                if ((type === 'Folder' && !folder.includes('/')) || (type === 'Sub-Table' && folder.includes('#SRT'))) {
                   tmpFolders.push({
                     'folder': folder, 'status': status, 
                     'orderDate': orderDate, 'startTime': startTime, 'endTime': endTime, 
