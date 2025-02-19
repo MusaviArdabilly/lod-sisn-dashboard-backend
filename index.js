@@ -35,16 +35,16 @@ const MAX_LOGIN_ATTEMPTS = 3;
 const COOLDOWN_PERIOD = 15 * 60 * 1000; //15 minutes
 
 // https
-// const agent = new https.Agent({
-//   cert: fs.readFileSync('/etc/nginx/ssl/D1UJHSHOSTLV001.crt'),
-//   key: fs.readFileSync('/etc/nginx/ssl/D1UJHSHOSTLV001.key'),
-//   rejectUnauthorized: false // Ensures SSL verification
-// });
-
-// http
 const agent = new https.Agent({
-  rejectUnauthorized: false
-})
+  cert: fs.readFileSync('/etc/nginx/ssl/certificate.crt'),
+  key: fs.readFileSync('/etc/nginx/ssl/certificate.key'),
+  rejectUnauthorized: false // Ensures SSL verification
+});
+
+// // http
+// const agent = new https.Agent({
+//   rejectUnauthorized: false
+// });
 
 function parseDate(time) {
   const year = time.slice(0, 4);
@@ -359,6 +359,9 @@ app.get('/api/update-all-v2', async (req, res) => {
 
     const statuses = response.data.statuses || [];
 
+    // const data = JSON.parse(fs.readFileSync('./response_1739788808801.json', 'utf8'));
+    // const statuses = data.statuses;
+
     const tmpApps = [];
     const tmpFolders = [];
     const tmpJobs = [];
@@ -403,9 +406,9 @@ app.get('/api/update-all-v2', async (req, res) => {
             for (const action of actions) {
               if (folder.includes(`${action}_${appName}_To_${location}`)) {
                 // if (type === 'Folder' && (!folder.includes('/') || folder.includes('#SRT'))) {
-                if ((type === 'Folder' && !folder.includes('/')) || (type === 'Sub-Table' && folder.includes('#SRT'))) {
+                if ((type === 'Folder' && !folder.includes('/')) || (type === 'Sub-Table' && name.includes('#SRT'))) {
                   tmpFolders.push({
-                    'folder': folder, 'status': status, 
+                    'name': name, 'folder': folder, 'status': status, 'type': type, 
                     'orderDate': orderDate, 'startTime': startTime, 'endTime': endTime, 
                     'estimatedStartTime': estimatedStartTime, 'estimatedEndTime': estimatedEndTime, 
                     'application': application
@@ -439,7 +442,7 @@ app.get('/api/update-all-v2', async (req, res) => {
       tmpFolders
         .sort((a, b) => parseDate(b.startTime) - parseDate(a.startTime)) // Sort by start_time descending
         .reduce((map, folder) => {
-          const key = `${folder.folder}-${folder.orderDate}`;
+          const key = `${folder.name}-${folder.orderDate}`;
           if (!map.has(key) || parseDate(folder.startTime) > parseDate(map.get(key).startTime)) {
             map.set(key, folder);
           }
@@ -466,10 +469,12 @@ app.get('/api/update-all-v2', async (req, res) => {
     
     const insertOrUpdateFolders = `
       INSERT INTO folders (
-        name, status, order_date, start_time, end_time, estimated_start_time,
-        estimated_end_time, application
+        name, folder, type, status, order_date, start_time, end_time, 
+        estimated_start_time, estimated_end_time, application
       ) VALUES ${uniqueFolders.map(folder => `(
+          '${escapeString(folder.name)}',
           '${escapeString(folder.folder)}',
+          '${escapeString(folder.type)}',
           '${escapeString(folder.status)}',
           ${folder.orderDate ? `TO_TIMESTAMP('${folder.orderDate}', 'YYMMDD') AT TIME ZONE 'Asia/Jakarta'` 
             : `TO_TIMESTAMP('19990101', 'YYMMDD') AT TIME ZONE 'Asia/Jakarta'`}, 
@@ -579,7 +584,7 @@ app.get('/api/jobs-folders/:app', async (req, res) => {
       `, [`%${application}%`]);
 
     const folders = await db.query(`
-      SELECT name, application, status, 
+      SELECT name, folder, type, status, application, 
       NULLIF(start_time, '1999-01-01 00:00:00') AS start_time, 
       NULLIF(end_time, '1999-01-01 00:00:00') AS end_time, 
       NULLIF(estimated_start_time, '1999-01-01 00:00:00') AS estimated_start_time, 
@@ -591,11 +596,13 @@ app.get('/api/jobs-folders/:app', async (req, res) => {
       ORDER BY start_time DESC
     `, [`%${application}%`]);
 
+    // TODO: maybe bug when start before 12am (currently not using this). removed when its not causing bug
+    // add interval (CURRENT_DATE - INTERVAL '12 hours') because CTM PROD BDI is renewal day at 12.00am
     const result = await db.query(`
-        SELECT name, status, order_date, start_time, end_time, application, folder
+        SELECT name, folder, status, order_date, start_time, end_time, application
         FROM jobs
         WHERE application LIKE $1
-        AND order_date >= CURRENT_DATE
+        AND order_date >= (CURRENT_DATE - INTERVAL '12 hours') 
       `, [`%${application}%`]);
 
     const jobsDB = result.rows;
